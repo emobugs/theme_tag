@@ -1,0 +1,39 @@
+{
+  "name": "emoji-colosseum",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Faceless 24/7 TikTok LIVE игра: емоджи отбори в арена, подаръците задействат ефекти според стойността си.",
+  "scripts": {
+    "dev": "concurrently -k -n web,bridge -c cyan,magenta \"next dev -p 3000\" \"tsx watch bridge/server.ts\"",
+    "dev:sim": "concurrently -k -n web,bridge -c cyan,magenta \"next dev -p 3000\" \"tsx watch bridge/server.ts --sim\"",
+    "build": "next build",
+    "start": "concurrently -k -n web,bridge -c cyan,magenta \"next start -p 3000\" \"tsx bridge/server.ts\"",
+    "bridge": "tsx bridge/server.ts",
+    "bridge:sim": "tsx bridge/server.ts --sim",
+    "tune": "tsx scripts/tune.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "concurrently": "10.0.6",
+    "gsap": "3.15.0",
+    "matter-js": "0.20.0",
+    "next": "16.4.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "tiktok-live-connector": "2.5.0",
+    "tsx": "4.23.15",
+    "ws": "8.22.1"
+  },
+  "devDependencies": {
+    "@types/matter-js": "0.20.2",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/ws": "8.18.2",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=20.12.0"
+  }
+}
