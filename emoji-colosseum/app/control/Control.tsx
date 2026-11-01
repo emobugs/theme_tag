@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { TEAMS, TEAM_BY_ID, TIERS, type TeamId } from '../../shared/config';
-import type { InjectMsg, LiveEvent, SourceKind, StatsSnapshot } from '../../shared/events';
-import { bridgeUrl, connectBridge, type Feed } from '../../game/feed';
+import type { InjectMsg, LiveEvent, StatsSnapshot } from '../../shared/events';
+import { bridgeUrl, connectBridge, type Feed, type FeedStatus } from '../../game/feed';
 
 function describe(e: LiveEvent): string {
   const em = e.team ? TEAM_BY_ID[e.team].emoji : '·';
@@ -23,9 +23,10 @@ function describe(e: LiveEvent): string {
 
 export default function Control() {
   const feedRef = useRef<Feed | null>(null);
-  const [status, setStatus] = useState<{ connected: boolean; source: SourceKind; status: string; sim: boolean }>({
+  const [status, setStatus] = useState<FeedStatus>({
     connected: false,
     source: 'sim',
+    platforms: [],
     status: 'свързване...',
     sim: false,
   });

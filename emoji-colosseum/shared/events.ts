@@ -1,4 +1,4 @@
-import type { TeamId } from './config';
+import type { Platform, TeamId } from './config';
 
 export interface Viewer {
   id: string;
@@ -41,11 +41,19 @@ export interface StatsSnapshot {
   rounds: number;
 }
 
-export type SourceKind = 'tiktok' | 'sim' | 'offline';
+// live = поне една платформа (виж platforms), sim = симулатор в bridge-а, offline = симулатор в браузъра
+export type SourceKind = 'live' | 'sim' | 'offline';
+
+export interface BridgeStatus {
+  source: SourceKind;
+  platforms: Platform[];
+  status: string;
+  sim: boolean;
+}
 
 export type ServerMsg =
-  | { t: 'hello'; primary: boolean; source: SourceKind; status: string; sim: boolean }
-  | { t: 'status'; source: SourceKind; status: string; sim: boolean }
+  | ({ t: 'hello'; primary: boolean } & BridgeStatus)
+  | ({ t: 'status' } & BridgeStatus)
   | { t: 'primary'; primary: boolean }
   | { t: 'event'; e: LiveEvent }
   | { t: 'stats'; s: StatsSnapshot };

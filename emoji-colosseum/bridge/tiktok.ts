@@ -1,17 +1,9 @@
 import { ControlEvent, SignConfig, TikTokLiveConnection, WebcastEvent } from 'tiktok-live-connector';
 import type { Viewer } from '../shared/events';
+import { sleep, type Adapter, type PlatformSink } from './types';
 
 // Връзка с TikTok LIVE през tiktok-live-connector (неофициална библиотека).
 // Полетата се четат защитно, защото TikTok често сменя формата.
-
-export interface TikTokSink {
-  chat(user: Viewer, text: string): void;
-  gift(user: Viewer, coins: number, count: number, giftName: string, giftImage?: string): void;
-  like(user: Viewer, count: number): void;
-  share(user: Viewer): void;
-  follow(user: Viewer): void;
-  status(text: string, connected: boolean): void;
-}
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function viewerOf(u: any): Viewer | null {
@@ -25,9 +17,7 @@ function viewerOf(u: any): Viewer | null {
   return { id, name, avatar };
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-export function startTikTok(username: string, sink: TikTokSink, apiKey?: string) {
+export function startTikTok(username: string, sink: PlatformSink, apiKey?: string): Adapter {
   if (apiKey) SignConfig.apiKey = apiKey;
   let stopped = false;
   let conn: TikTokLiveConnection | null = null;
@@ -92,13 +82,15 @@ export function startTikTok(username: string, sink: TikTokSink, apiKey?: string)
 
   const loop = async () => {
     while (!stopped) {
-      conn = new TikTokLiveConnection(username, { processInitialData: false, enableExtendedGiftInfo: true });
-      wire(conn);
-      const closed = new Promise<void>((resolve) => {
-        conn!.on(ControlEvent.DISCONNECTED, () => resolve());
-        conn!.on(WebcastEvent.STREAM_END, () => resolve());
-      });
       try {
+        conn = new TikTokLiveConnection(username, { processInitialData: false, enableExtendedGiftInfo: true });
+        wire(conn);
+        conn.on(ControlEvent.ERROR, (e: any) => console.warn('[tiktok]', e?.info ?? '', String(e?.exception?.message ?? e).slice(0, 200)));
+        const c = conn;
+        const closed = new Promise<void>((resolve) => {
+          c.on(ControlEvent.DISCONNECTED, () => resolve());
+          c.on(WebcastEvent.STREAM_END, () => resolve());
+        });
         sink.status(`свързване с @${username}...`, false);
         const state = await conn.connect();
         sink.status(`на живо: @${username} (room ${state.roomId})`, true);
@@ -109,11 +101,11 @@ export function startTikTok(username: string, sink: TikTokSink, apiKey?: string)
         sink.status(`не е на живо или грешка: ${msg}`, false);
       }
       try {
-        await conn.disconnect();
+        await conn?.disconnect();
       } catch {
         /* вече е затворена */
       }
-      conn.removeAllListeners();
+      conn?.removeAllListeners();
       if (!stopped) await sleep(20_000);
     }
   };

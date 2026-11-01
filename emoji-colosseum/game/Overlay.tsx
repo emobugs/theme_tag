@@ -2,14 +2,31 @@
 
 import gsap from 'gsap';
 import { useEffect, useRef, useState } from 'react';
-import { GAME, TEAMS, TEAM_BY_ID, TIERS, type TeamId } from '../shared/config';
-import type { SourceKind, StatsSnapshot } from '../shared/events';
+import { GAME, TEAMS, TEAM_BY_ID, TIERS, type Platform, type TeamId } from '../shared/config';
+import type { StatsSnapshot } from '../shared/events';
 import { Sfx, Voice } from './audio';
 import { Game, type HudState, type Notice } from './engine';
-import { bridgeUrl, connectBridge, connectOffline, type Feed } from './feed';
+import { bridgeUrl, connectBridge, connectOffline, type Feed, type FeedStatus } from './feed';
 import { Renderer } from './render';
 
-const A = GAME.arena;
+// portrait = TikTok (1080x1920), landscape = Twitch / YouTube (1920x1080).
+// Арената е 900x900 и в двата случая, мести се само позицията ѝ.
+type Layout = 'portrait' | 'landscape';
+const LAYOUTS: Record<Layout, { w: number; h: number; arena: { x: number; y: number } }> = {
+  portrait: { w: GAME.stageW, h: GAME.stageH, arena: { x: GAME.arena.x, y: GAME.arena.y } },
+  landscape: { w: 1920, h: 1080, arena: { x: 510, y: 150 } },
+};
+const ARENA = GAME.arena.size;
+
+// В каква валута се показват цените на нивата.
+type Unit = 'coins' | 'bits' | 'usd';
+const UNIT_BY_PLATFORM: Record<Platform, Unit> = { tiktok: 'coins', twitch: 'bits', youtube: 'usd' };
+
+function tierPrice(min: number, unit: Unit): string | null {
+  if (unit === 'usd') return min >= 100 ? `$${min / 100}+` : null; // най-малкият Super Chat е $1
+  const n = min >= 1000 ? `${min / 1000}k` : String(min);
+  return unit === 'bits' ? `${n} bits` : `${n}+`;
+}
 
 const INITIAL_HUD: HudState = {
   phase: 'countdown',
@@ -47,26 +64,35 @@ export default function Overlay() {
   const [scale, setScale] = useState(1);
   const [hud, setHud] = useState<HudState>(INITIAL_HUD);
   const [stats, setStats] = useState<StatsSnapshot | null>(null);
-  const [status, setStatus] = useState<{ connected: boolean; source: SourceKind; status: string }>({
+  const [status, setStatus] = useState<FeedStatus>({
     connected: false,
     source: 'sim',
+    platforms: [],
     status: 'свързване...',
+    sim: false,
   });
+  const [layout, setLayout] = useState<Layout>('portrait');
+  const [unitParam, setUnitParam] = useState<Unit | null>(null);
+  const L = LAYOUTS[layout];
   const [debug, setDebug] = useState(false);
   const [needClick, setNeedClick] = useState(false);
   const sfxRef = useRef<Sfx | null>(null);
 
-  // мащабиране на сцената 1080x1920 към прозореца
+  // мащабиране на сцената към прозореца
   useEffect(() => {
-    const fit = () => setScale(Math.min(window.innerWidth / GAME.stageW, window.innerHeight / GAME.stageH));
+    const fit = () => setScale(Math.min(window.innerWidth / L.w, window.innerHeight / L.h));
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, []);
+  }, [L.w, L.h]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     setDebug(params.get('debug') === '1');
+    const lp = params.get('layout');
+    if (lp === 'landscape' || lp === 'h' || lp === 'horizontal') setLayout('landscape');
+    const up = params.get('unit');
+    if (up === 'coins' || up === 'bits' || up === 'usd') setUnitParam(up);
     const muted = params.get('mute') === '1';
     const sfx = new Sfx(Number(params.get('vol') ?? 0.5), muted);
     sfxRef.current = sfx;
@@ -151,7 +177,7 @@ export default function Overlay() {
     const handlers = {
       onEvent: (e: Parameters<Game['apply']>[0]) => game.apply(e),
       onStats: (s: StatsSnapshot) => setStats(s),
-      onStatus: (s: { connected: boolean; source: SourceKind; status: string }) => setStatus(s),
+      onStatus: (s: FeedStatus) => setStatus(s),
       onPrimary: (p: boolean) => {
         primary = p;
       },
@@ -194,13 +220,15 @@ export default function Overlay() {
     };
   }, []);
 
+  const unit: Unit = unitParam ?? (status.platforms.length === 1 ? UNIT_BY_PLATFORM[status.platforms[0]] : 'coins');
+  const tiers = TIERS.map((t) => ({ ...t, price: tierPrice(t.min, unit) })).filter((t) => t.price);
   const leader = hud.winner ?? hud.teams.filter((t) => t.alive).sort((a, b) => b.hp - a.hp)[0]?.id;
   const winsSorted = stats ? [...TEAMS].sort((a, b) => stats.todayWins[b.id] - stats.todayWins[a.id]) : [...TEAMS];
   const maxWins = stats ? Math.max(1, ...Object.values(stats.todayWins)) : 1;
 
   return (
     <div className="viewport">
-      <div className="stage" style={{ width: GAME.stageW, height: GAME.stageH, transform: `translate(-50%, -50%) scale(${scale})` }}>
+      <div className={`stage ${layout}`} style={{ width: L.w, height: L.h, transform: `translate(-50%, -50%) scale(${scale})` }}>
         <div className="sky" />
 
         <header className="header">
@@ -251,8 +279,8 @@ export default function Overlay() {
           })}
         </section>
 
-        <div className="arena" ref={arenaRef} style={{ left: A.x, top: A.y, width: A.size, height: A.size }}>
-          <canvas ref={canvasRef} width={A.size} height={A.size} />
+        <div className="arena" ref={arenaRef} style={{ left: L.arena.x, top: L.arena.y, width: ARENA, height: ARENA }}>
+          <canvas ref={canvasRef} width={ARENA} height={ARENA} />
           <div className="toasts" ref={toastsRef} />
           <div className="banner" ref={bannerRef} />
         </div>
@@ -261,11 +289,11 @@ export default function Overlay() {
           Пиши в чата {TEAMS.map((t) => t.emoji).join(' ')} и влез в отбор
         </div>
 
-        <section className="tiers">
-          {TIERS.map((t) => (
+        <section className="tiers" style={{ ['--n' as string]: tiers.length }}>
+          {tiers.map((t) => (
             <div key={t.action} className="tier">
               <div className="tier-icon">{t.icon}</div>
-              <div className="tier-coins">{t.min >= 1000 ? `${t.min / 1000}k+` : `${t.min}+`}</div>
+              <div className="tier-coins">{t.price}</div>
               <div className="tier-label">{t.label}</div>
             </div>
           ))}

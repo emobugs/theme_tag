@@ -1,6 +1,6 @@
 # Emoji Колизеум
 
-Faceless TikTok LIVE игра, която се върти 24/7.
+Faceless игра за лайфове в TikTok, Twitch и YouTube, която се върти 24/7.
 
 **Пълно ръководство за локална работа: [docs/local-setup.md](docs/local-setup.md)**
 
@@ -32,13 +32,14 @@ Faceless TikTok LIVE игра, която се върти 24/7.
 ## Архитектура
 
 ```
-TikTok LIVE ──► bridge (Node, порт 8787) ──WebSocket──► overlay (Next.js, /overlay)
+TikTok / Twitch / YouTube ──► bridge (Node, порт 8787) ──WebSocket──► overlay (Next.js, /overlay)
                   │  отбори, класации                        │  физика (Matter.js), canvas, GSAP
                   └─ data/stats.json                         └─ докладва победителите обратно
 контролен панел (/control) ──► bridge  (тестови подаръци, симулатор)
 ```
 
-- `bridge/` чете събитията с [tiktok-live-connector](https://github.com/zerodytrash/TikTok-Live-Connector) (неофициална библиотека), пази кой в кой отбор е и записва класациите в `data/stats.json`. Ако overlay-ът се презареди, нищо не се губи.
+- `bridge/` чете събитията: TikTok с [tiktok-live-connector](https://github.com/zerodytrash/TikTok-Live-Connector) (неофициална библиотека), Twitch през анонимния чат сървър, YouTube през вътрешния адрес на чата (без API ключ). Може и трите наведнъж. Пази кой в кой отбор е и записва класациите в `data/stats.json`. Ако overlay-ът се презареди, нищо не се губи.
+- Bits, абонаментите и Super Chat се превръщат в монети, затова нивата важат навсякъде. Таблицата е в [docs/local-setup.md](docs/local-setup.md#10-twitch-и-youtube).
 - `game/` е самата игра. Логиката (`engine.ts`) е без DOM и може да се тества headless.
 - `shared/` е общият код: конфигурация, типове, отбори и класации, симулатор.
 
@@ -62,6 +63,7 @@ npm start                 # overlay на :3000, bridge на :8787
 
 | Параметър | Действие |
 |---|---|
+| `?layout=landscape` | хоризонтален екран 1920x1080 за Twitch и YouTube |
 | `?offline=1` | демо със симулатор в браузъра |
 | `?ws=ws://1.2.3.4:8787` | bridge на друга машина |
 | `?mute=1`, `?vol=0.3` | звук |

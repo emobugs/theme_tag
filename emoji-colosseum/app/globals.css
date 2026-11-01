@@ -315,7 +315,7 @@ body {
   top: 1442px;
   height: 92px;
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--n, 7), minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -435,7 +435,9 @@ body {
 .status {
   position: absolute;
   left: 40px;
-  top: 140px;
+  top: 40px;
+  max-width: 1000px;
+  line-height: 1.3;
   padding: 6px 12px;
   border-radius: 99px;
   background: rgba(255, 59, 92, 0.2);
@@ -460,6 +462,128 @@ body {
   color: #000;
   font: 800 22px var(--font-body), system-ui, sans-serif;
   cursor: pointer;
+}
+
+/* ---------- хоризонтален layout за Twitch / YouTube (1920x1080) ---------- */
+
+.stage.landscape .header {
+  left: 40px;
+  right: auto;
+  top: 40px;
+  width: 430px;
+  height: 120px;
+}
+
+.stage.landscape .logo-top {
+  font-size: 30px;
+}
+
+.stage.landscape .logo-bottom {
+  font-size: 46px;
+}
+
+/* таймерът стои над арената, в центъра */
+.stage.landscape .timer {
+  position: absolute;
+  left: 470px;
+  top: 4px;
+  width: 900px;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 24px;
+  text-align: center;
+}
+
+.stage.landscape .timer-value {
+  margin-top: 0;
+  font-size: 64px;
+}
+
+.stage.landscape .teams {
+  left: 40px;
+  right: auto;
+  top: 180px;
+  width: 430px;
+  height: 860px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: repeat(8, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stage.landscape .team-emoji {
+  font-size: 46px;
+}
+
+.stage.landscape .team-row {
+  font-size: 19px;
+}
+
+.stage.landscape .team-row.small {
+  font-size: 14px;
+}
+
+.stage.landscape .cta {
+  left: 1450px;
+  right: auto;
+  top: 40px;
+  width: 430px;
+  height: auto;
+  white-space: normal;
+  text-align: left;
+  font-size: 24px;
+  line-height: 1.35;
+}
+
+.stage.landscape .tiers {
+  left: 1450px;
+  right: auto;
+  top: 130px;
+  width: 430px;
+  height: auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stage.landscape .tier {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 8px;
+  text-align: left;
+  padding: 6px 10px;
+}
+
+.stage.landscape .tier-icon {
+  grid-row: span 2;
+  font-size: 30px;
+  text-align: center;
+}
+
+.stage.landscape .boards {
+  left: 1450px;
+  right: auto;
+  top: 420px;
+  bottom: 40px;
+  width: 430px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.stage.landscape .status {
+  left: 40px;
+  top: 6px;
+  max-width: 1840px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 15px;
+}
+
+.stage.landscape .sound {
+  right: 40px;
+  top: 6px;
 }
 
 /* ---------- контролен панел и начална страница (mobile-first) ---------- */

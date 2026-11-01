@@ -1,36 +1,50 @@
+import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
-import { BRIDGE, TEAM_BY_ID, type TeamId } from '../shared/config';
-import type { ClientMsg, InjectMsg, LiveEvent, ServerMsg, SourceKind, Viewer } from '../shared/events';
+import { BRIDGE, PLATFORMS, TEAM_BY_ID, type Platform, type TeamId } from '../shared/config';
+import type { BridgeStatus, ClientMsg, InjectMsg, LiveEvent, ServerMsg, Viewer } from '../shared/events';
 import { Room } from '../shared/room';
 import { Simulator } from '../shared/sim';
 import { createSaver, loadState } from './store';
 import { startTikTok } from './tiktok';
+import { startTwitch } from './twitch';
+import type { Adapter, PlatformSink } from './types';
+import { startYouTube } from './youtube';
 
-// Bridge: TikTok LIVE -> нормализирани събития -> WebSocket към overlay-а.
+// Bridge: TikTok / Twitch / YouTube -> нормализирани събития -> WebSocket към overlay-а.
+// Може да чете и трите платформи наведнъж (мултистрийм в една арена).
 // Държи отборите и класациите, за да не се губят при презареждане на overlay-а.
 
-try {
-  process.loadEnvFile('.env');
-} catch {
-  /* няма .env, ползваме само process.env */
+// 24/7 процес: една неочаквана грешка не бива да спира играта.
+process.on('unhandledRejection', (err) => console.error('[bridge] необработена грешка (продължавам):', err));
+process.on('uncaughtException', (err) => console.error('[bridge] неочаквана грешка (продължавам):', err));
+
+const hasEnv = existsSync('.env');
+if (hasEnv) {
+  try {
+    process.loadEnvFile('.env');
+  } catch (err) {
+    console.warn('[bridge] .env не можа да се прочете:', (err as Error).message);
+  }
 }
 
 const argv = new Set(process.argv.slice(2));
-const PORT = Number(process.env.BRIDGE_PORT ?? BRIDGE.defaultPort);
-const USERNAME = (process.env.TIKTOK_USERNAME ?? '').replace(/^@/, '').trim();
-const MODE = argv.has('--sim') ? 'sim' : (process.env.MODE ?? 'auto');
-const DATA_FILE = resolve(process.env.DATA_FILE ?? 'data/stats.json');
+const PORT = Number(process.env.BRIDGE_PORT || BRIDGE.defaultPort);
+const MODE = argv.has('--sim') ? 'sim' : (process.env.MODE || 'auto');
+const DATA_FILE = resolve(process.env.DATA_FILE || 'data/stats.json');
+const CONFIG: Record<Platform, string> = {
+  tiktok: (process.env.TIKTOK_USERNAME ?? '').replace(/^@/, '').trim(),
+  twitch: (process.env.TWITCH_CHANNEL ?? '').trim(),
+  youtube: (process.env.YOUTUBE_CHANNEL ?? '').trim(),
+};
+const LABEL: Record<Platform, string> = { tiktok: 'TikTok', twitch: 'Twitch', youtube: 'YouTube' };
 
 const room = new Room(loadState(DATA_FILE), () => {
   saver.schedule();
   statsDirty = true;
 });
 const saver = createSaver(DATA_FILE, () => room.state);
-
-let source: SourceKind = 'sim';
-let statusText = 'стартиране';
 let statsDirty = true;
 
 interface Client {
@@ -61,42 +75,72 @@ function electPrimary() {
   if (primary) send(primary, { t: 'primary', primary: true });
 }
 
-// ---------- източници ----------
+// ---------- статус ----------
 
-const sink = {
-  chat: (u: Viewer, text: string) => emit(room.chat(u, text)),
-  gift: (u: Viewer, coins: number, count: number, name: string, image?: string, team?: TeamId) =>
-    emit(room.gift(u, coins, count, name, image, team)),
-  like: (u: Viewer, count: number) => emit(room.like(u, count)),
-  share: (u: Viewer) => emit(room.share(u)),
-  follow: (u: Viewer) => emit(room.follow(u)),
-};
+const platformStatus = new Map<Platform, { text: string; ok: boolean }>();
+const sim = new Simulator(
+  {
+    chat: (u, t) => emit(room.chat(u, t)),
+    gift: (u, c, n, g) => emit(room.gift(u, c, n, g)),
+    like: (u, n) => emit(room.like(u, n)),
+    share: (u) => emit(room.share(u)),
+    follow: (u) => emit(room.follow(u)),
+  },
+  1,
+);
 
-const sim = new Simulator(sink, 1);
-
-function setStatus(text: string) {
-  statusText = text;
-  console.log(`[bridge] ${text}`);
-  broadcast({ t: 'status', source, status: text, sim: sim.running });
+function currentStatus(): BridgeStatus {
+  const platforms = [...platformStatus.keys()];
+  const parts = platforms.map((p) => `${platformStatus.get(p)!.ok ? '✓' : '…'} ${LABEL[p]}: ${platformStatus.get(p)!.text}`);
+  if (sim.running) parts.push('симулатор');
+  return {
+    source: platforms.length ? 'live' : 'sim',
+    platforms,
+    status: parts.join(' · ') || 'без източник',
+    sim: sim.running,
+  };
 }
 
-let tiktok: { stop(): Promise<void> } | null = null;
+function pushStatus() {
+  broadcast({ t: 'status', ...currentStatus() });
+}
 
-if (MODE !== 'sim' && USERNAME) {
-  source = 'tiktok';
-  tiktok = startTikTok(
-    USERNAME,
-    {
-      ...sink,
-      status: (text) => setStatus(text),
+// ---------- платформи ----------
+
+function sinkFor(p: Platform): PlatformSink {
+  const id = (u: Viewer): Viewer => ({ ...u, id: `${p}:${u.id}` });
+  const chatLikes = p === 'tiktok' ? 0 : PLATFORMS[p].chatLikes;
+  return {
+    chat: (u, text) => {
+      const events = room.chat(id(u), text);
+      emit(events);
+      // Twitch и YouTube нямат лайкове: всяко съобщение в чата лекува отбора на зрителя
+      if (!events.length && chatLikes) emit(room.like(id(u), chatLikes));
     },
-    process.env.EULER_API_KEY || undefined,
-  );
-} else {
-  if (MODE === 'tiktok') console.warn('[bridge] MODE=tiktok, но TIKTOK_USERNAME е празно. Пускам симулатор.');
-  source = 'sim';
+    gift: (u, coins, count, name, image) => emit(room.gift(id(u), coins, count, name, image)),
+    like: (u, n) => emit(room.like(id(u), n)),
+    share: (u) => emit(room.share(id(u))),
+    follow: (u) => emit(room.follow(id(u))),
+    status: (text, ok) => {
+      const prev = platformStatus.get(p);
+      platformStatus.set(p, { text, ok });
+      if (prev?.text !== text) console.log(`[${p}] ${text}`);
+      pushStatus();
+    },
+  };
+}
+
+const adapters: Adapter[] = [];
+if (MODE !== 'sim') {
+  if (CONFIG.tiktok) adapters.push(startTikTok(CONFIG.tiktok, sinkFor('tiktok'), process.env.EULER_API_KEY || undefined));
+  if (CONFIG.twitch) adapters.push(startTwitch(CONFIG.twitch, sinkFor('twitch')));
+  if (CONFIG.youtube) adapters.push(startYouTube(CONFIG.youtube, sinkFor('youtube')));
+}
+if (!adapters.length) {
+  if (MODE !== 'sim') {
+    console.log('[bridge] няма зададена платформа (TIKTOK_USERNAME, TWITCH_CHANNEL или YOUTUBE_CHANNEL в .env). Пускам симулатор.');
+  }
   sim.start();
-  setStatus('симулатор (без TikTok)');
 }
 
 // ---------- инжектиране от контролния панел ----------
@@ -110,19 +154,19 @@ function inject(e: InjectMsg) {
   const u = injectViewer(e.name);
   switch (e.kind) {
     case 'chat':
-      return sink.chat(u, e.text);
+      return emit(room.chat(u, e.text));
     case 'gift': {
-      const team = e.team && TEAM_BY_ID[e.team] ? e.team : undefined;
+      const team: TeamId | undefined = e.team && TEAM_BY_ID[e.team] ? e.team : undefined;
       const coins = Math.max(1, Math.floor(e.coins));
       const count = Math.min(999, Math.max(1, Math.floor(e.count)));
-      return sink.gift(u, coins, count, e.giftName ?? `${coins} монети`, undefined, team);
+      return emit(room.gift(u, coins, count, e.giftName ?? `${coins} монети`, undefined, team));
     }
     case 'like':
-      return sink.like(u, Math.max(1, Math.floor(e.count)));
+      return emit(room.like(u, Math.max(1, Math.floor(e.count))));
     case 'share':
-      return sink.share(u);
+      return emit(room.share(u));
     case 'follow':
-      return sink.follow(u);
+      return emit(room.follow(u));
   }
 }
 
@@ -130,11 +174,21 @@ function inject(e: InjectMsg) {
 
 const http = createServer((req, res) => {
   if (req.url === '/health') {
-    res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
-    res.end(JSON.stringify({ ok: true, source, status: statusText, clients: clients.size, sim: sim.running }));
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' });
+    res.end(JSON.stringify({ ok: true, ...currentStatus(), clients: clients.size }));
     return;
   }
   res.writeHead(404).end();
+});
+
+http.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n[bridge] Порт ${PORT} е зает от друга програма (често втори пуснат bridge или Cloudflare wrangler).`);
+    console.error('[bridge] Затвори другия процес или сложи BRIDGE_PORT=8788 в .env и отвори overlay-а с ?ws=ws://localhost:8788\n');
+  } else {
+    console.error('[bridge] сървърът не може да стартира:', err);
+  }
+  process.exit(1);
 });
 
 const wss = new WebSocketServer({ server: http });
@@ -154,7 +208,7 @@ wss.on('connection', (ws) => {
       case 'role':
         c.role = msg.role === 'control' ? 'control' : 'overlay';
         electPrimary();
-        send(c, { t: 'hello', primary: c === primary, source, status: statusText, sim: sim.running });
+        send(c, { t: 'hello', primary: c === primary, ...currentStatus() });
         send(c, { t: 'stats', s: room.snapshot() });
         break;
       case 'inject':
@@ -164,7 +218,7 @@ wss.on('connection', (ws) => {
         if (c.role !== 'control') break;
         if (msg.on) sim.start();
         else sim.stop();
-        setStatus(statusText);
+        pushStatus();
         break;
       case 'roundStart':
         if (c === primary) room.roundStart();
@@ -179,6 +233,7 @@ wss.on('connection', (ws) => {
     }
   });
 
+  ws.on('error', () => ws.close());
   ws.on('close', () => {
     clients.delete(c);
     if (primary === c) {
@@ -196,14 +251,19 @@ setInterval(() => {
 }, 500);
 
 http.listen(PORT, () => {
-  console.log(`[bridge] WebSocket на ws://localhost:${PORT}  (health: http://localhost:${PORT}/health)`);
+  const on = (Object.keys(CONFIG) as Platform[]).filter((p) => CONFIG[p] && MODE !== 'sim');
+  console.log('');
+  console.log(`[bridge] ✓ работи на ws://localhost:${PORT}   (проверка: http://localhost:${PORT}/health)`);
+  console.log(`[bridge] .env: ${hasEnv ? 'намерен' : 'НЯМА (ползвам само системните променливи)'}`);
+  console.log(`[bridge] платформи: ${on.length ? on.map((p) => `${LABEL[p]} (${CONFIG[p]})`).join(', ') : 'няма, симулатор'}`);
   console.log(`[bridge] данни: ${DATA_FILE}`);
+  console.log('');
 });
 
 const shutdown = async () => {
   console.log('[bridge] спиране...');
   sim.stop();
-  await tiktok?.stop();
+  await Promise.allSettled(adapters.map((a) => a.stop()));
   saver.flush();
   process.exit(0);
 };

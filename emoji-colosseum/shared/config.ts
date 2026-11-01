@@ -98,4 +98,36 @@ export const BRIDGE = {
   defaultPort: 8787,
 };
 
+export type Platform = 'tiktok' | 'twitch' | 'youtube';
+
+// Как се превръщат плащанията от другите платформи в "монети" (1 монета ≈ 1 цент).
+// Така таблицата TIERS важи навсякъде.
+export const PLATFORMS = {
+  twitch: {
+    // 1 Bit ≈ 1 цент, затова Bits = монети 1:1
+    bitsToCoins: 1,
+    // абонамент по ниво (Prime се брои като Tier 1)
+    subCoins: { Prime: 500, '1000': 500, '2000': 1000, '3000': 2500 } as Record<string, number>,
+    raidCoins: 300, // рейд = бомба
+    // всяко съобщение в чата лекува отбора като лайкове (Twitch няма лайкове)
+    chatLikes: 3,
+  },
+  youtube: {
+    coinsPerUsd: 100, // Super Chat $1 = 100 монети = щит, $3 = бомба, $10 = метеор, $100 = корона
+    memberCoins: 500, // ново членство или подарено членство = бомба
+    chatLikes: 3,
+    minPollMs: 1500,
+    maxPollMs: 6000,
+  },
+};
+
+// Приблизителни курсове към долар. Само за превръщане на Super Chat в монети, не за счетоводство.
+export const USD_RATES: Record<string, number> = {
+  USD: 1, EUR: 1.08, BGN: 0.55, GBP: 1.27, CHF: 1.12, PLN: 0.25, RON: 0.22, CZK: 0.043, HUF: 0.0027,
+  SEK: 0.095, NOK: 0.093, DKK: 0.145, TRY: 0.029, RSD: 0.0092, UAH: 0.024, RUB: 0.011,
+  CAD: 0.73, AUD: 0.66, NZD: 0.6, MXN: 0.055, BRL: 0.18, ARS: 0.001, CLP: 0.0011, COP: 0.00025,
+  JPY: 0.0067, KRW: 0.00073, INR: 0.012, IDR: 0.000062, PHP: 0.017, THB: 0.028, VND: 0.00004,
+  HKD: 0.128, TWD: 0.031, SGD: 0.74, MYR: 0.22, ILS: 0.27, AED: 0.27, SAR: 0.27, ZAR: 0.054,
+};
+
 export const TIMEZONE = 'Europe/Sofia';

@@ -1,15 +1,17 @@
 import { BRIDGE } from '../shared/config';
-import type { ClientMsg, LiveEvent, ServerMsg, SourceKind, StatsSnapshot } from '../shared/events';
+import type { BridgeStatus, ClientMsg, LiveEvent, ServerMsg, StatsSnapshot } from '../shared/events';
 import { Room, type PersistedState } from '../shared/room';
 import { Simulator } from '../shared/sim';
 
 // Източник на събития за overlay-а и контролния панел.
 // online: WebSocket към bridge-а. offline: Room + симулатор в самия браузър.
 
+export type FeedStatus = BridgeStatus & { connected: boolean };
+
 export interface FeedHandlers {
   onEvent?: (e: LiveEvent) => void;
   onStats?: (s: StatsSnapshot) => void;
-  onStatus?: (s: { connected: boolean; source: SourceKind; status: string; sim: boolean }) => void;
+  onStatus?: (s: FeedStatus) => void;
   onPrimary?: (primary: boolean) => void;
 }
 
@@ -47,10 +49,10 @@ export function connectBridge(url: string, role: 'overlay' | 'control', h: FeedH
       switch (msg.t) {
         case 'hello':
           h.onPrimary?.(msg.primary);
-          h.onStatus?.({ connected: true, source: msg.source, status: msg.status, sim: msg.sim });
+          h.onStatus?.({ connected: true, source: msg.source, platforms: msg.platforms ?? [], status: msg.status, sim: msg.sim });
           break;
         case 'status':
-          h.onStatus?.({ connected: true, source: msg.source, status: msg.status, sim: msg.sim });
+          h.onStatus?.({ connected: true, source: msg.source, platforms: msg.platforms ?? [], status: msg.status, sim: msg.sim });
           break;
         case 'primary':
           h.onPrimary?.(msg.primary);
@@ -65,7 +67,13 @@ export function connectBridge(url: string, role: 'overlay' | 'control', h: FeedH
     };
     ws.onclose = () => {
       h.onPrimary?.(false);
-      h.onStatus?.({ connected: false, source: 'sim', status: `няма връзка с bridge (${url})`, sim: false });
+      h.onStatus?.({
+        connected: false,
+        source: 'sim',
+        platforms: [],
+        status: `няма връзка с bridge (${url}). Пусни "npm run dev" и виж реда [bridge] в терминала, или отвори с ?offline=1`,
+        sim: false,
+      });
       if (closed) return;
       timer = setTimeout(open, retry);
       retry = Math.min(retry * 2, 8000);
@@ -121,7 +129,7 @@ export function connectOffline(h: FeedHandlers): Feed {
   }, 500);
   setTimeout(() => {
     h.onPrimary?.(true);
-    h.onStatus?.({ connected: true, source: 'offline', status: 'офлайн демо (симулатор в браузъра)', sim: true });
+    h.onStatus?.({ connected: true, source: 'offline', platforms: [], status: 'офлайн демо (симулатор в браузъра)', sim: true });
   }, 0);
 
   return {

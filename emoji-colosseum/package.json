@@ -12,7 +12,8 @@
     "bridge": "tsx bridge/server.ts",
     "bridge:sim": "tsx bridge/server.ts --sim",
     "tune": "tsx scripts/tune.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:adapters": "tsx scripts/test-adapters.ts"
   },
   "dependencies": {
     "concurrently": "10.0.6",
